@@ -1,100 +1,96 @@
-"""
-Some codes from https://github.com/Newmu/dcgan_code
-"""
-from __future__ import division
-import math
-import json
-import random
-import pprint
-import scipy.misc
+import tensorflow as tf
+from tensorflow.keras import layers
+import os
+import cv2
 import numpy as np
-from time import gmtime, strftime
-
-pp = pprint.PrettyPrinter()
-
-get_stddev = lambda x, k_h, k_w: 1/math.sqrt(k_w*k_h*x.get_shape()[-1])
-
-# -----------------------------
-# new added functions for pix2pix
-
-def load_data(image_path, flip=True, is_test=False):
-    img_A, img_B = load_image(image_path)
-    img_A, img_B = preprocess_A_and_B(img_A, img_B, flip=flip, is_test=is_test)
-
-    img_A = img_A/127.5 - 1.
-    img_B = img_B/127.5 - 1.
-
-    img_AB = np.concatenate((img_A, img_B), axis=2)
-    # img_AB shape: (fine_size, fine_size, input_c_dim + output_c_dim)
-    return img_AB
-
-def load_image(image_path):
-    input_img = imread(image_path)
-    w = int(input_img.shape[1])
-    w2 = int(w/2)
-    img_A = input_img[:, 0:w2]
-    img_B = input_img[:, w2:w]
-
-    return img_A, img_B
-
-def preprocess_A_and_B(img_A, img_B, load_size=286, fine_size=256, flip=True, is_test=False):
-    if is_test:
-        img_A = scipy.misc.imresize(img_A, [fine_size, fine_size])
-        img_B = scipy.misc.imresize(img_B, [fine_size, fine_size])
-    else:
-        img_A = scipy.misc.imresize(img_A, [load_size, load_size])
-        img_B = scipy.misc.imresize(img_B, [load_size, load_size])
-
-        h1 = int(np.ceil(np.random.uniform(1e-2, load_size-fine_size)))
-        w1 = int(np.ceil(np.random.uniform(1e-2, load_size-fine_size)))
-        img_A = img_A[h1:h1+fine_size, w1:w1+fine_size]
-        img_B = img_B[h1:h1+fine_size, w1:w1+fine_size]
-
-        if flip and np.random.random() > 0.5:
-            img_A = np.fliplr(img_A)
-            img_B = np.fliplr(img_B)
-
-    return img_A, img_B
-
-# -----------------------------
-
-def get_image(image_path, image_size, is_crop=True, resize_w=64, is_grayscale = False):
-    return transform(imread(image_path, is_grayscale), image_size, is_crop, resize_w)
-
-def save_images(images, size, image_path):
-    return imsave(inverse_transform(images), size, image_path)
-
-def imread(path, is_grayscale = False):
-    if (is_grayscale):
-        return scipy.misc.imread(path, flatten = True).astype(np.float)
-    else:
-        return scipy.misc.imread(path).astype(np.float)
-
-def merge_images(images, size):
-    return inverse_transform(images)
-
-def merge(images, size):
-    h, w = images.shape[1], images.shape[2]
-    img = np.zeros((h * size[0], w * size[1], 3))
-    for idx, image in enumerate(images):
-        i = idx % size[1]
-        j = idx // size[1]
-        img[j*h:j*h+h, i*w:i*w+w, :] = image
-
-    return img
-
-def imsave(images, size, path):
-    return scipy.misc.imsave(path, merge(images, size))
-
-def transform(image, npx=64, is_crop=True, resize_w=64):
-    # npx : # of pixels width/height of image
-    if is_crop:
-        cropped_image = center_crop(image, npx, resize_w=resize_w)
-    else:
-        cropped_image = image
-    return np.array(cropped_image)/127.5 - 1.
-
-def inverse_transform(images):
-    return (images+1.)/2.
 
 
+def lrelu(x, alpha=0.2):
+    return tf.nn.leaky_relu(x, alpha=alpha)
+
+class ReflectionPadding2D(layers.Layer):
+    """
+    Optional: Some people prefer reflection padding for better style transfers.
+    For Pix2Pix, 'same' padding with Conv2D is typically enough.
+    This is just an example if you want reflection padding.
+    """
+    def __init__(self, padding=(1,1), **kwargs):
+        self.padding = tuple(padding)
+        super(ReflectionPadding2D, self).__init__(**kwargs)
+
+    def call(self, input_tensor, mask=None):
+        pad_w, pad_h = self.padding
+        return tf.pad(
+            input_tensor,
+            [[0,0], [pad_h, pad_h], [pad_w, pad_w], [0,0]],
+            'REFLECT'
+        )
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({"padding": self.padding})
+        return config
+
+
+def convert_color(dirpath=r"D:\9.Pairset Color Transfer\IMAGEB",
+                  color=(0, 255, 0)):
+    """
+    Convert any grayscale image in 'dirpath' into a tinted color version,
+    using the specified 'color' (BGR) to tint the image.
+
+    Args:
+        dirpath (str): Path to the folder containing images.
+        color (tuple): BGR color for tinting, e.g. (B, G, R).
+                       Default is (0, 255, 0) => green.
+
+    Supported extensions: .bmp, .jpg, .jpeg, .png, .tif, .tiff
+    """
+    SUPPORTED_EXTENSIONS = ('.bmp', '.jpg', '.jpeg', '.png', '.tif', '.tiff')
+
+    for filename in os.listdir(dirpath):
+        if filename.lower().endswith(SUPPORTED_EXTENSIONS):
+            full_path = os.path.join(dirpath, filename)
+
+            # Read image (as is). If grayscale, shape will be (H,W) or (H,W,1)
+            img = cv2.imread(full_path, cv2.IMREAD_UNCHANGED)
+
+            if img is None:
+                print(f"Could not read '{filename}'. Skipping...")
+                continue
+
+            # Check if it's already color (3 channels or 4 channels).
+            # If it's grayscale, it often has 2 dims or the 3rd dim == 1.
+            if len(img.shape) == 2:
+                # shape: (H, W), definitely grayscale
+                h, w = img.shape
+                # Convert to float in [0,1]
+                gray_float = img.astype(np.float32) / 255.0
+                # Expand to 3 channels
+                gray_float_3d = np.stack([gray_float, gray_float, gray_float], axis=-1)
+            elif len(img.shape) == 3 and img.shape[2] == 1:
+                # shape: (H, W, 1)
+                h, w, c = img.shape
+                gray_float = img[:, :, 0].astype(np.float32) / 255.0
+                gray_float_3d = np.stack([gray_float, gray_float, gray_float], axis=-1)
+            else:
+                # Already color (e.g., (H,W,3) or (H,W,4))
+                print(f"'{filename}' is already color or has alpha channel. Skipping tint.")
+                continue
+
+            # color is a tuple of BGR in [0..255]
+            color_arr = np.array(color, dtype=np.float32)
+
+            # Multiply each pixel by the chosen color
+            #   gray_float_3d: shape (H, W, 3) in [0..1]
+            #   color_arr: shape (3,) in [0..255]
+            colored = gray_float_3d * color_arr
+
+            # Clip and convert back to uint8 in [0..255]
+            colored = np.clip(colored, 0, 255).astype(np.uint8)
+
+            # Save in place
+            cv2.imwrite(full_path, colored)
+            print(f"Converted grayscale '{filename}' to color with tint {color}.")
+
+if __name__ == "__main__":
+    convert_color()

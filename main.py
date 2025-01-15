@@ -1,58 +1,57 @@
-import argparse
+from model import *
+from data import *
 import os
-import scipy.misc
-import numpy as np
 
-from model import pix2pix
-import tensorflow as tf
 
-parser = argparse.ArgumentParser(description='')
-parser.add_argument('--dataset_name', dest='dataset_name', default='facades', help='name of the dataset')
-parser.add_argument('--epoch', dest='epoch', type=int, default=200, help='# of epoch')
-parser.add_argument('--batch_size', dest='batch_size', type=int, default=1, help='# images in batch')
-parser.add_argument('--train_size', dest='train_size', type=int, default=1e8, help='# images used to train')
-parser.add_argument('--load_size', dest='load_size', type=int, default=286, help='scale images to this size')
-parser.add_argument('--fine_size', dest='fine_size', type=int, default=256, help='then crop to this size')
-parser.add_argument('--ngf', dest='ngf', type=int, default=64, help='# of gen filters in first conv layer')
-parser.add_argument('--ndf', dest='ndf', type=int, default=64, help='# of discri filters in first conv layer')
-parser.add_argument('--input_nc', dest='input_nc', type=int, default=3, help='# of input image channels')
-parser.add_argument('--output_nc', dest='output_nc', type=int, default=3, help='# of output image channels')
-parser.add_argument('--niter', dest='niter', type=int, default=200, help='# of iter at starting learning rate')
-parser.add_argument('--lr', dest='lr', type=float, default=0.0002, help='initial learning rate for adam')
-parser.add_argument('--beta1', dest='beta1', type=float, default=0.5, help='momentum term of adam')
-parser.add_argument('--flip', dest='flip', type=bool, default=True, help='if flip the images for data argumentation')
-parser.add_argument('--which_direction', dest='which_direction', default='AtoB', help='AtoB or BtoA')
-parser.add_argument('--phase', dest='phase', default='train', help='train, test')
-parser.add_argument('--save_epoch_freq', dest='save_epoch_freq', type=int, default=50, help='save a model every save_epoch_freq epochs (does not overwrite previously saved models)')
-parser.add_argument('--save_latest_freq', dest='save_latest_freq', type=int, default=5000, help='save the latest model every latest_freq sgd iterations (overwrites the previous latest model)')
-parser.add_argument('--print_freq', dest='print_freq', type=int, default=50, help='print the debug information every print_freq iterations')
-parser.add_argument('--continue_train', dest='continue_train', type=bool, default=False, help='if continue training, load the latest model: 1: true, 0: false')
-parser.add_argument('--serial_batches', dest='serial_batches', type=bool, default=False, help='f 1, takes images in order to make batches, otherwise takes them randomly')
-parser.add_argument('--serial_batch_iter', dest='serial_batch_iter', type=bool, default=True, help='iter into serial image list')
-parser.add_argument('--checkpoint_dir', dest='checkpoint_dir', default='./checkpoint', help='models are saved here')
-parser.add_argument('--sample_dir', dest='sample_dir', default='./sample', help='sample are saved here')
-parser.add_argument('--test_dir', dest='test_dir', default='./test', help='test sample are saved here')
-parser.add_argument('--L1_lambda', dest='L1_lambda', type=float, default=100.0, help='weight on L1 term in objective')
+NUM_EPOCHS = 1
+MODEL_SAVE_DIRPATH = r"C:\Users\hsji\Downloads"
+EARLYSTOP_PATIENCE = 15
 
-args = parser.parse_args()
+if __name__ == "__main__":
+    # 1. Create the dataset
+    folderA = "D:\9.Pairset Color Transfer\IMAGE_GRAY"
+    folderB = "D:\9.Pairset Color Transfer\IMAGE_COLOR"
+    batch_size = 1
+    image_size = (256, 256)
 
-def main(_):
-    if not os.path.exists(args.checkpoint_dir):
-        os.makedirs(args.checkpoint_dir)
-    if not os.path.exists(args.sample_dir):
-        os.makedirs(args.sample_dir)
-    if not os.path.exists(args.test_dir):
-        os.makedirs(args.test_dir)
+    train_ds = create_image_pairs_dataset(folderA, folderB,
+                                          batch_size=batch_size,
+                                          image_size=image_size)
 
-    with tf.Session() as sess:
-        model = pix2pix(sess, image_size=args.fine_size, batch_size=args.batch_size,
-                        output_size=args.fine_size, dataset_name=args.dataset_name,
-                        checkpoint_dir=args.checkpoint_dir, sample_dir=args.sample_dir)
+    # 2. Create the generator & discriminator
+    generator = Generator(gf=64, output_channels=3)
+    discriminator = Discriminator(df=64)
 
-        if args.phase == 'train':
-            model.train(args)
-        else:
-            model.test(args)
+    # 3. Create the Pix2Pix model
+    pix2pix_model = Pix2Pix(generator, discriminator, lambda_L1=100.0)
 
-if __name__ == '__main__':
-    tf.app.run()
+    earlystop_callback = tf.keras.callbacks.EarlyStopping(
+        monitor='g_loss',
+        patience=EARLYSTOP_PATIENCE,
+        mode='min',
+        restore_best_weights=True
+    )
+
+    # 4. Compile with optimizers
+    generator_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
+    discriminator_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
+    pix2pix_model.compile(
+        g_optimizer=generator_optimizer,
+        d_optimizer=discriminator_optimizer,
+    )
+
+    # 5. Fit the model
+    # (Note: For large datasets or multi-epoch, you may want model.fit(..., epochs=..., steps_per_epoch=...))
+    pix2pix_model.fit(train_ds, epochs=NUM_EPOCHS,callbacks=[earlystop_callback])
+    # I want to save entire model (in FINAL folder, model would be there)
+
+    pix2pix_model.build(input_shape=[None, image_size[0], image_size[1], 3])  # None for batch size
+    pix2pix_model.save(MODEL_SAVE_DIRPATH)
+
+
+    # 6. (Optional) Save model weights
+    model_save_dirpath = os.path.join(MODEL_SAVE_DIRPATH, "checkpoints")
+    if not os.path.exists(model_save_dirpath):
+        os.makedirs(model_save_dirpath)
+    pix2pix_model.generator.save(os.path.join(model_save_dirpath, "generator.ckpt"))
+    pix2pix_model.discriminator.save(os.path.join(model_save_dirpath, "discriminator.ckpt"))

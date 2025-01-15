@@ -1,5 +1,5 @@
 import math
-import numpy as np 
+import numpy as np
 import tensorflow as tf
 
 from tensorflow.python.framework import ops
@@ -41,44 +41,95 @@ def conv_cond_concat(x, y):
     y_shapes = y.get_shape()
     return tf.concat([x, y*tf.ones([x_shapes[0], x_shapes[1], x_shapes[2], y_shapes[3]])], 3)
 
-def conv2d(input_, output_dim, 
-           k_h=5, k_w=5, d_h=2, d_w=2, stddev=0.02,
-           name="conv2d"):
-    with tf.variable_scope(name):
-        w = tf.get_variable('w', [k_h, k_w, input_.get_shape()[-1], output_dim],
-                            initializer=tf.truncated_normal_initializer(stddev=stddev))
-        conv = tf.nn.conv2d(input_, w, strides=[1, d_h, d_w, 1], padding='SAME')
+import tensorflow as tf
 
-        biases = tf.get_variable('biases', [output_dim], initializer=tf.constant_initializer(0.0))
-        conv = tf.reshape(tf.nn.bias_add(conv, biases), conv.get_shape())
+class ConvBlock(tf.keras.layers.Layer):
+    """
+    A simple block that does Conv -> optional BN -> optional LeakyReLU/ReLU
+    """
+    def __init__(self,
+                 filters,
+                 kernel_size=4,
+                 strides=2,
+                 padding="same",
+                 apply_batchnorm=True,
+                 apply_relu=True,
+                 leaky_relu=False,
+                 stddev=0.02,
+                 name=None):
+        super(ConvBlock, self).__init__(name=name)
+        self.apply_batchnorm = apply_batchnorm
+        self.apply_relu = apply_relu
+        self.leaky_relu = leaky_relu
 
-        return conv
+        # Convolution
+        self.conv = tf.keras.layers.Conv2D(
+            filters,
+            kernel_size,
+            strides=strides,
+            padding=padding,
+            kernel_initializer=tf.random_normal_initializer(stddev=stddev),
+            use_bias=not apply_batchnorm  # If using BN, bias can be omitted
+        )
 
-def deconv2d(input_, output_shape,
-             k_h=5, k_w=5, d_h=2, d_w=2, stddev=0.02,
-             name="deconv2d", with_w=False):
-    with tf.variable_scope(name):
-        # filter : [height, width, output_channels, in_channels]
-        w = tf.get_variable('w', [k_h, k_w, output_shape[-1], input_.get_shape()[-1]],
-                            initializer=tf.random_normal_initializer(stddev=stddev))
-        
-        try:
-            deconv = tf.nn.conv2d_transpose(input_, w, output_shape=output_shape,
-                                strides=[1, d_h, d_w, 1])
+        # Optional BatchNorm
+        if self.apply_batchnorm:
+            self.bn = tf.keras.layers.BatchNormalization()
 
-        # Support for verisons of TensorFlow before 0.7.0
-        except AttributeError:
-            deconv = tf.nn.deconv2d(input_, w, output_shape=output_shape,
-                                strides=[1, d_h, d_w, 1])
+    def call(self, x, training=True):
+        x = self.conv(x)
+        if self.apply_batchnorm:
+            x = self.bn(x, training=training)
 
-        biases = tf.get_variable('biases', [output_shape[-1]], initializer=tf.constant_initializer(0.0))
-        deconv = tf.reshape(tf.nn.bias_add(deconv, biases), deconv.get_shape())
+        if self.apply_relu:
+            if self.leaky_relu:
+                x = tf.nn.leaky_relu(x, alpha=0.2)
+            else:
+                x = tf.nn.relu(x)
+        return x
 
-        if with_w:
-            return deconv, w, biases
-        else:
-            return deconv
-       
+
+class DeconvBlock(tf.keras.layers.Layer):
+    """
+    Deconv (Conv2DTranspose) -> optional BN -> optional Dropout -> ReLU
+    """
+    def __init__(self,
+                 filters,
+                 kernel_size=4,
+                 strides=2,
+                 padding="same",
+                 apply_batchnorm=True,
+                 apply_dropout=False,
+                 dropout_rate=0.5,
+                 stddev=0.02,
+                 name=None):
+        super(DeconvBlock, self).__init__(name=name)
+        self.apply_batchnorm = apply_batchnorm
+        self.apply_dropout = apply_dropout
+
+        self.deconv = tf.keras.layers.Conv2DTranspose(
+            filters,
+            kernel_size,
+            strides=strides,
+            padding=padding,
+            kernel_initializer=tf.random_normal_initializer(stddev=stddev),
+            use_bias=not apply_batchnorm
+        )
+
+        if self.apply_batchnorm:
+            self.bn = tf.keras.layers.BatchNormalization()
+
+        self.dropout = tf.keras.layers.Dropout(dropout_rate)
+
+    def call(self, x, training=True):
+        x = self.deconv(x)
+        if self.apply_batchnorm:
+            x = self.bn(x, training=training)
+        if self.apply_dropout:
+            x = self.dropout(x, training=training)
+        x = tf.nn.relu(x)  # Typically ReLU in Pix2Pix decoders
+        return x
+
 
 def lrelu(x, leak=0.2, name="lrelu"):
   return tf.maximum(x, leak*x)
@@ -95,3 +146,5 @@ def linear(input_, output_size, scope=None, stddev=0.02, bias_start=0.0, with_w=
             return tf.matmul(input_, matrix) + bias, matrix, bias
         else:
             return tf.matmul(input_, matrix) + bias
+
+
