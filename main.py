@@ -1,57 +1,125 @@
-from model import *
-from data import *
-import os
+import configuration
+from model import build_generator, build_discriminator
+from data import create_image_pairs_dataset
+from configuration import *
+from utils import *
 
 
-NUM_EPOCHS = 1
-MODEL_SAVE_DIRPATH = r"C:\Users\hsji\Downloads"
-EARLYSTOP_PATIENCE = 15
+# 1. Create the dataset
+train_ds = create_image_pairs_dataset(FOLDER_GRAY, FOLDER_COLOR,
+                                      batch_size=BATCH_SIZE,
+                                      image_size=IMAGE_SIZE)
 
-if __name__ == "__main__":
-    # 1. Create the dataset
-    folderA = "D:\9.Pairset Color Transfer\IMAGE_GRAY"
-    folderB = "D:\9.Pairset Color Transfer\IMAGE_COLOR"
-    batch_size = 1
-    image_size = (256, 256)
+# 2. Build functional models for Generator and Discriminator
+generator = build_generator(gf=64, output_channels=3, input_shape=(IMAGE_SIZE[0],IMAGE_SIZE[1],3))
+# Discriminator expects concatenated images along channels (6 channels total)
+discriminator = build_discriminator(df=64, input_shape=(IMAGE_SIZE[0],IMAGE_SIZE[1],6))
 
-    train_ds = create_image_pairs_dataset(folderA, folderB,
-                                          batch_size=batch_size,
-                                          image_size=image_size)
+# 3. Set up optimizers and loss
+generator_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
+discriminator_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
+loss_obj = tf.keras.losses.BinaryCrossentropy(from_logits=True)
 
-    # 2. Create the generator & discriminator
-    generator = Generator(gf=64, output_channels=3)
-    discriminator = Discriminator(df=64)
+def generator_loss(disc_generated_output, gen_output, target, lambda_L1=100.0):
+    adv_loss = loss_obj(tf.ones_like(disc_generated_output), disc_generated_output)
+    l1_loss = tf.reduce_mean(tf.abs(target - gen_output))
+    total_gen_loss = adv_loss + (lambda_L1 * l1_loss)
+    return total_gen_loss, adv_loss, l1_loss
 
-    # 3. Create the Pix2Pix model
-    pix2pix_model = Pix2Pix(generator, discriminator, lambda_L1=100.0)
+def discriminator_loss(disc_real_output, disc_generated_output):
+    real_loss = loss_obj(tf.ones_like(disc_real_output), disc_real_output)
+    generated_loss = loss_obj(tf.zeros_like(disc_generated_output), disc_generated_output)
+    return real_loss + generated_loss
 
-    earlystop_callback = tf.keras.callbacks.EarlyStopping(
-        monitor='g_loss',
-        patience=EARLYSTOP_PATIENCE,
-        mode='min',
-        restore_best_weights=True
+@tf.function
+def train_step(input_image, target_image):
+    with tf.GradientTape(persistent=True) as tape:
+        # Generate fake image from input
+        fake_image = generator(input_image, training=True)
+
+        # Concatenate input with real and fake outputs for discriminator
+        real_concat = tf.concat([input_image, target_image], axis=-1)
+        fake_concat = tf.concat([input_image, fake_image], axis=-1)
+
+        # Discriminator forward passes
+        disc_real = discriminator(real_concat, training=True)
+        disc_fake = discriminator(fake_concat, training=True)
+
+        # Compute losses
+        d_loss = discriminator_loss(disc_real, disc_fake)
+        g_loss, adv_loss, l1_loss = generator_loss(disc_fake, fake_image, target_image)
+
+    # Compute gradients
+    generator_grads = tape.gradient(g_loss, generator.trainable_variables)
+    discriminator_grads = tape.gradient(d_loss, discriminator.trainable_variables)
+
+    # Apply gradients
+    generator_optimizer.apply_gradients(zip(generator_grads, generator.trainable_variables))
+    discriminator_optimizer.apply_gradients(zip(discriminator_grads, discriminator.trainable_variables))
+
+    return {"g_loss": g_loss, "d_loss": d_loss, "adv_loss": adv_loss, "l1_loss": l1_loss}
+
+
+
+# Create checkpoint and manager
+checkpoint = tf.train.Checkpoint(generator=generator,
+                                 discriminator=discriminator,
+                                 generator_optimizer=generator_optimizer,
+                                 discriminator_optimizer=discriminator_optimizer)
+
+manager = tf.train.CheckpointManager(checkpoint,
+                                     directory='checkpoints/best_model',
+                                     max_to_keep=1)
+
+# 4. Training loop with Early Stopping
+best_loss = float('inf')
+patience_counter = 0
+# Fetch one sample batch for saving
+sample_input, sample_target = next(iter(train_ds))
+
+for epoch in range(NUM_EPOCHS):
+    print(f"Epoch {epoch+1}/{NUM_EPOCHS}")
+    epoch_g_loss_sum = 0.0
+    steps_count = 0
+
+    for step, (input_image, target_image) in enumerate(train_ds):
+        losses = train_step(input_image, target_image)
+        epoch_g_loss_sum += losses["g_loss"].numpy()
+        steps_count += 1
+
+        if step % 100 == 0:
+            print(f"Step {step}, Generator Loss: {losses['g_loss'].numpy()}, Discriminator Loss: {losses['d_loss'].numpy()}")
+
+
+    save_intermediate_results(
+        generator,
+        sample_input,
+        sample_target,
+        epoch + 1,
+        output_dir=configuration.CHECK_IMAGE_DIRPATH,
+        num_images=configuration.BATCH_SIZE
     )
 
-    # 4. Compile with optimizers
-    generator_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
-    discriminator_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
-    pix2pix_model.compile(
-        g_optimizer=generator_optimizer,
-        d_optimizer=discriminator_optimizer,
-    )
+    # Compute average generator loss for the epoch
+    avg_epoch_g_loss = epoch_g_loss_sum / steps_count
+    print(f"Average Generator Loss for epoch {epoch+1}: {avg_epoch_g_loss}")
 
-    # 5. Fit the model
-    # (Note: For large datasets or multi-epoch, you may want model.fit(..., epochs=..., steps_per_epoch=...))
-    pix2pix_model.fit(train_ds, epochs=NUM_EPOCHS,callbacks=[earlystop_callback])
-    # I want to save entire model (in FINAL folder, model would be there)
+    # Check improvement for early stopping
+    if avg_epoch_g_loss < best_loss:
+        best_loss = avg_epoch_g_loss
+        patience_counter = 0
+        # Save a checkpoint
+        save_path = manager.save()
+        print(f"New best model saved at: {save_path}")
+    else:
+        patience_counter += 1
 
-    pix2pix_model.build(input_shape=[None, image_size[0], image_size[1], 3])  # None for batch size
-    pix2pix_model.save(MODEL_SAVE_DIRPATH)
+    if patience_counter >= EARLYSTOP_PATIENCE:
+        print("Early stopping triggered. Restoring best checkpoint...")
+        # Restore from the best checkpoint
+        checkpoint.restore(manager.latest_checkpoint)
+        break
 
-
-    # 6. (Optional) Save model weights
-    model_save_dirpath = os.path.join(MODEL_SAVE_DIRPATH, "checkpoints")
-    if not os.path.exists(model_save_dirpath):
-        os.makedirs(model_save_dirpath)
-    pix2pix_model.generator.save(os.path.join(model_save_dirpath, "generator.ckpt"))
-    pix2pix_model.discriminator.save(os.path.join(model_save_dirpath, "discriminator.ckpt"))
+# 5. Save the models
+generator.save(GENERATOR_MODEL_PATH)
+discriminator.save(DISCRIMINATOR_MODEL_PATH)

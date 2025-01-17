@@ -1,47 +1,5 @@
-import math
-import numpy as np
-import tensorflow as tf
-
-from tensorflow.python.framework import ops
-
 from utils import *
 
-class batch_norm(object):
-            # h1 = lrelu(tf.contrib.layers.batch_norm(conv2d(h0, self.df_dim*2, name='d_h1_conv'),decay=0.9,updates_collections=None,epsilon=0.00001,scale=True,scope="d_h1_conv"))
-    def __init__(self, epsilon=1e-5, momentum = 0.9, name="batch_norm"):
-        with tf.variable_scope(name):
-            self.epsilon = epsilon
-            self.momentum = momentum
-            self.name = name
-
-    def __call__(self, x, train=True):
-        return tf.contrib.layers.batch_norm(x, decay=self.momentum, updates_collections=None, epsilon=self.epsilon, scale=True, scope=self.name)
-
-def binary_cross_entropy(preds, targets, name=None):
-    """Computes binary cross entropy given `preds`.
-
-    For brevity, let `x = `, `z = targets`.  The logistic loss is
-
-        loss(x, z) = - sum_i (x[i] * log(z[i]) + (1 - x[i]) * log(1 - z[i]))
-
-    Args:
-        preds: A `Tensor` of type `float32` or `float64`.
-        targets: A `Tensor` of the same type and shape as `preds`.
-    """
-    eps = 1e-12
-    with ops.op_scope([preds, targets], name, "bce_loss") as name:
-        preds = ops.convert_to_tensor(preds, name="preds")
-        targets = ops.convert_to_tensor(targets, name="targets")
-        return tf.reduce_mean(-(targets * tf.log(preds + eps) +
-                              (1. - targets) * tf.log(1. - preds + eps)))
-
-def conv_cond_concat(x, y):
-    """Concatenate conditioning vector on feature map axis."""
-    x_shapes = x.get_shape()
-    y_shapes = y.get_shape()
-    return tf.concat([x, y*tf.ones([x_shapes[0], x_shapes[1], x_shapes[2], y_shapes[3]])], 3)
-
-import tensorflow as tf
 
 class ConvBlock(tf.keras.layers.Layer):
     """
