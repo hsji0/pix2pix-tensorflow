@@ -1,5 +1,5 @@
 import tensorflow as tf
-import os
+
 
 def load_image(img_path, target_size=(256, 256)):
     """Load and preprocess a single image."""
@@ -9,6 +9,10 @@ def load_image(img_path, target_size=(256, 256)):
        image = tf.io.decode_bmp(image, channels=3)
     elif img_path.endswith('.png'):
         image = tf.io.decode_png(image, channels=3)
+    elif img_path.lower().endswith(('.jpg', '.jpeg')):
+        image = tf.io.decode_jpeg(image, channels=3)
+    else:
+        raise ValueError("Unsupported image format")
 
     # image = tf.io.decode_jpeg(image, channels=3)  # or decode_png if PNG
     # Convert to float [0, 1], then optionally scale to [-1, 1] if desired

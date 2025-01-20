@@ -3,7 +3,6 @@ import tensorflow as tf
 import numpy as np
 from configuration import *
 
-
 def preprocess_grayscale_image(image_path, target_size=IMAGE_SIZE):
     image = tf.io.read_file(image_path)
     image = tf.image.decode_image(image, channels=3)  # decode to 3 channels if needed
@@ -39,21 +38,12 @@ if __name__ == "__main__":
         elif image_file.endswith('jpeg'):
             image = tf.io.decode_jpeg(image, channels=3)
 
-        # image = tf.io.decode_jpeg(image, channels=3)  # or decode_png if PNG
-        # Convert to float [0, 1], then optionally scale to [-1, 1] if desired
         image = tf.image.convert_image_dtype(image, tf.float32)
-        # Resize
         image = tf.image.resize(image, IMAGE_SIZE)
-        # You may want to scale to [-1,1], as often used in Pix2Pix
-        image = (image * 2.0) - 1.0
+        image = tf.image.rgb_to_hsv(image)
         image = tf.expand_dims(image, 0)
-        # image_path = os.path.join(SOURCE_DIRPATH, image_file)
-        #
-        # # Preprocess the input image and add batch dimension
-        # input_image = preprocess_grayscale_image(image_path)
-        # input_image = tf.expand_dims(input_image, axis=0)  # shape: (1, H, W, 3)
 
-        # Run inference
+
         generated_output = generator(image, training=False)  # shape: (1, H, W, 3)
 
         # Take the first (and only) image from the batch
@@ -61,25 +51,19 @@ if __name__ == "__main__":
 
         # (Optional) Compute mean to check the average pixel intensity
         mean_val = tf.reduce_mean(output_image)
-        print("Mean pixel value (in [-1,1]):", mean_val.numpy())
-
-        #####################################################################
-        # Post-process & save using TF ops, without converting to NumPy/PIL. #
-        #####################################################################
-
-        # 1) Scale from [-1, 1] → [0, 1]
-        output_image = (output_image + 1.0) / 2.0
         output_image = tf.clip_by_value(output_image, 0.0, 1.0)
-        output_image = tf.image.resize(output_image, TARGET_SIZE)
+
+        image = tf.image.hsv_to_rgb(output_image)
         # 2) Convert to uint8 ([0, 255])
-        output_image_uint8 = tf.image.convert_image_dtype(output_image, dtype=tf.uint8)
+        image = tf.image.resize(image, TARGET_SIZE)
+        output_image_uint8 = tf.image.convert_image_dtype(image, dtype=tf.uint8)
 
         # 3) Encode as PNG
         encoded_png = tf.io.encode_png(output_image_uint8)
 
         # 4) Write the PNG bytes to a file
         if SAVE_IMAGES:
-            base_name, _ = os.path.splitext(image_file)
+            base_name, _ = os.path.splitext(os.path.basename(image_file))
             output_file_name = base_name + "_generated.png"
             output_path = os.path.join(OUTPUT_SAVE_DIRPATH, output_file_name)
             tf.io.write_file(output_path, encoded_png)

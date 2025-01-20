@@ -1,10 +1,17 @@
 import os
 from PIL import Image
 
+"""
+503 : GRAY Defect
+519 : SL Defect
+
+"""
+
 # Directories and paths - adjust these as needed
 smt_folder = r"D:\9.Pairset Color Transfer\temptest"        # Folder containing all SMT and TIFF files
 TARGET_GRAY_FOLDER = r"D:\9.Pairset Color Transfer\temptest\Gray" # Save folder for extracted gray images
 TARGET_COLOR_FOLDER = r"D:\9.Pairset Color Transfer\temptest\Color" # Save folder for extracted color images
+
 
 def filter_503_dict(filepath):
     """
@@ -138,30 +145,33 @@ def process_file_set(core_name, file_before, file_after):
             except Exception as e:
                 print(f"Error processing Color frame {did}: {e}")
 
-# Group SMT files by their core basename (ignoring suffixes like " (2)", "복사본", etc.)
-smt_files = [f for f in os.listdir(smt_folder) if f.lower().endswith('.smt')]
-groups = {}
 
-def normalize_basename(filename):
-    # Remove common suffix patterns like " (2)", " 복사본" and extension
-    base = os.path.splitext(filename)[0]
-    for pattern in [" (2)", " 복사본"]:
-        base = base.replace(pattern, "")
-    return base
+if __name__ == "__main__":
 
-for f in smt_files:
-    core = normalize_basename(f)
-    groups.setdefault(core, []).append(f)
+    # Group SMT files by their core basename (ignoring suffixes like " (2)", "복사본", etc.)
+    smt_files = [f for f in os.listdir(smt_folder) if f.lower().endswith('.smt')]
+    groups = {}
 
-# For each group that has at least two SMT files, assume we have a before and after pair.
-for core_name, files in groups.items():
-    if len(files) < 2:
-        continue  # Skip if we don't have both before and after
+    def normalize_basename(filename):
+        # Remove common suffix patterns like " (2)", " 복사본" and extension
+        base = os.path.splitext(filename)[0]
+        for pattern in [" (2)", " 복사본"]:
+            base = base.replace(pattern, "")
+        return base
 
-    # Sort files for consistency; assume first is before, second is after
-    files.sort()
-    file_before = os.path.join(smt_folder, files[0])
-    file_after = os.path.join(smt_folder, files[1])
+    for f in smt_files:
+        core = normalize_basename(f)
+        groups.setdefault(core, []).append(f)
 
-    print(f"Processing set: {core_name}")
-    process_file_set(core_name, file_before, file_after)
+    # For each group that has at least two SMT files, assume we have a before and after pair.
+    for core_name, files in groups.items():
+        if len(files) < 2:
+            continue  # Skip if we don't have both before and after
+
+        # Sort files for consistency; assume first is before, second is after
+        files.sort()
+        file_before = os.path.join(smt_folder, files[0])
+        file_after = os.path.join(smt_folder, files[1])
+
+        print(f"Processing set: {core_name}")
+        process_file_set(core_name, file_before, file_after)

@@ -26,11 +26,11 @@ bash ./download_dataset.sh facades
 ```
 - Train the model
 ```bash
-python main.py --phase train
+python train.py --phase train
 ```
 - Test the model:
 ```bash
-python main.py --phase test
+python train.py --phase test
 ```
 
 ## Results

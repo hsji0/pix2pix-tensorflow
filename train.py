@@ -120,6 +120,12 @@ for epoch in range(NUM_EPOCHS):
         checkpoint.restore(manager.latest_checkpoint)
         break
 
+
+if not os.path.exists(GENERATOR_MODEL_PATH):
+    os.makedirs(GENERATOR_MODEL_PATH)
+if not os.path.exists(DISCRIMINATOR_MODEL_PATH):
+    os.makedirs(DISCRIMINATOR_MODEL_PATH)
+
 # 5. Save the models
 generator.save(GENERATOR_MODEL_PATH)
 discriminator.save(DISCRIMINATOR_MODEL_PATH)

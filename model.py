@@ -56,6 +56,42 @@ def build_generator(gf=64, output_channels=3, input_shape=(256, 256, 3)):
 
     return tf.keras.Model(inputs=inputs, outputs=outputs, name="Generator")
 
+### for 320x240 input size
+def build_generator_320(gf=64, output_channels=3, input_shape=(240, 320, 3)):
+    inputs = layers.Input(shape=input_shape)
+
+    # Downsampling
+    d1 = down_block(inputs, gf, apply_batchnorm=False)
+    d2 = down_block(d1, gf*2)
+    d3 = down_block(d2, gf*4)
+    d4 = down_block(d3, gf*8)
+    d5 = down_block(d4, gf*8)
+    d6 = down_block(d5, gf*8)
+
+    # Upsampling with skip connections
+    # u1 = up_block(d8, gf*8, apply_dropout=True)
+    u1 = up_block(d6, gf*8, apply_dropout=True)
+    u1 = layers.Concatenate()([u1, d5])
+    u2 = up_block(u1, gf*8, apply_dropout=True)
+    u2 = layers.Concatenate()([u2, d4])
+    u3 = up_block(u2, gf*8, apply_dropout=True)
+    u3 = layers.Concatenate()([u3, d3])
+    u4 = up_block(u3, gf*8)
+    u4 = layers.Concatenate()([u4, d2])
+    u5 = up_block(u4, gf*4)
+    u5 = layers.Concatenate()([u5, d1])
+
+    initializer = tf.random_normal_initializer(0., 0.02)
+    last = layers.Conv2DTranspose(output_channels, 4, strides=2, padding='same',
+                                  kernel_initializer=initializer, activation='tanh')
+    outputs = last(u5)
+
+    return tf.keras.Model(inputs=inputs, outputs=outputs, name="Generator")
+
+
+"""
+This fully convolutional design allows the network to make decisions on local patches of the image, which is the essence of PatchGAN.
+"""
 def build_discriminator(df=64, input_shape=(256, 256, 6)):
     inputs = layers.Input(shape=input_shape)
     initializer = tf.random_normal_initializer(0., 0.02)

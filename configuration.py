@@ -1,16 +1,21 @@
 import os
+from datetime import datetime
 
 # --- Common Directories ---
-MODEL_SAVE_DIRPATH = r"D:\9.Pairset Color Transfer\MODEL\Flash Melt Mold\250117"
+traning_time = datetime.today().strftime("%d%m%y")
+MODEL_SAVE_DIRPATH = rf"D:\9.Pairset Color Transfer\MODEL\Flash Melt Mold\250117"
 
 # --- Inference Configuration ---
 GENERATOR_MODEL_PATH = os.path.join(MODEL_SAVE_DIRPATH, "generator_model")
 DISCRIMINATOR_MODEL_PATH = os.path.join(MODEL_SAVE_DIRPATH, "discriminator_model")
-SOURCE_DIRPATH = r"D:\9.Pairset Color Transfer\image\Flash Melt Mold\crop_0_test\GRAY"         # Folder containing input images
-OUTPUT_SAVE_DIRPATH = r"D:\9.Pairset Color Transfer\image\Flash Melt Mold\crop_0_test\GEN"    # Folder to save results
+SOURCE_DIRPATH = r"D:\9.Pairset Color Transfer\image\Flash Melt Mold\crop_0_test\GRAY\defect"         # Folder containing input images
+OUTPUT_SAVE_DIRPATH = r"D:\9.Pairset Color Transfer\image\Flash Melt Mold\crop_0_test\GEN\defect"    # Folder to save results
 SAVE_IMAGES = True                                   # Set to True to save generated images
+TARGET_SIZE = (480, 640)
 
 # --- Training Configuration ---
+TRAIN_MODE = "HSV"
+
 NUM_EPOCHS = 1000
 EARLYSTOP_PATIENCE = 15
 # FOLDER_GRAY = r"D:\9.Pairset Color Transfer\IMAGE_GRAY"
